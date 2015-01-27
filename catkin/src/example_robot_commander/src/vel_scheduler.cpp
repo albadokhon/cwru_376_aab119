@@ -79,7 +79,7 @@ void masterLoop(ros::NodeHandle& nh, double seg_len, bool rotate, double rot_phi
     
     double start_phi = 0.0; // Compare with odom_phi
     double rotation_done = 0.0;
-    double new_cmd_omega = -0.314; // update spin rate command as well
+    double new_cmd_omega = 0.0; // update spin rate command as well
 
     geometry_msgs::Twist cmd_vel; //create a variable of type "Twist" to publish speed/spin commands
 
@@ -182,21 +182,18 @@ void masterLoop(ros::NodeHandle& nh, double seg_len, bool rotate, double rot_phi
     { // WHEN THERE IS ROTATION $$$$$$$$$$$$$$$$
             
         ros::spinOnce(); // allow callbacks to populate fresh data
-        // compute Rotation done so far:
-        //double delta_x = odom_x_ - start_x;
-        //double delta_y = odom_y_ - start_y;
         rotation_done = odom_phi_ - start_phi;
         ROS_INFO("Rotation Traveled: %f", rotation_done);
         double rot_to_go = rot_phi - rotation_done;
-
+        ROS_INFO("Rotation ToDo: %f", rot_to_go);
         //use segment_length_done to decide what vel should be, as per plan
-        //if (floor(rot_to_go*100) == rot_phi*100) { // at goal, or overshot; stop!
-          //  scheduled_vel=0.0;
-        //}
-        if (floor(rot_to_go*100) <= floor(R_dist_decel*100)) { //possibly should be braking to a halt
+        if (floor(rot_to_go*100) <= 0.0) { // at goal, or overshot; stop!
+            scheduled_vel=0.0;
+        }
+        else if (floor(rot_to_go*100) <= floor(R_dist_decel*100)) { //possibly should be braking to a halt
             // dist = 0.5*a*t_halt^2; so t_halt = sqrt(2*dist/a);   v = a*t_halt
             // so v = a*sqrt(2*dist/a) = sqrt(2*dist*a)
-            scheduled_vel = sqrt(2 * sqrt(rot_to_go*rot_to_go) * alpha_max);
+            scheduled_vel = sqrt(2 * rot_to_go * alpha_max);
             ROS_INFO("Rotation braking zone: v_sched = %f",scheduled_vel);
         }
         else { // not ready to decel, so target vel is v_max, either accel to it or hold it
@@ -208,7 +205,7 @@ void masterLoop(ros::NodeHandle& nh, double seg_len, bool rotate, double rot_phi
             // may need to ramp up to v_max; do so within accel limits
             double v_test = odom_vel_ + alpha_max*dt_callback_; // if callbacks are slow, this could be abrupt
             // operator:  c = (a>b) ? a : b;
-            new_cmd_vel = (v_test < scheduled_vel) ? v_test : scheduled_vel; //choose lesser of two options
+            new_cmd_omega = (v_test < scheduled_vel) ? v_test : scheduled_vel; //choose lesser of two options
             // this prevents overshooting scheduled_vel
         } else if (odom_vel_ > scheduled_vel) { //travelling too fast--this could be trouble
             // ramp down to the scheduled velocity.  However, scheduled velocity might already be ramping down at a_max.
@@ -217,20 +214,20 @@ void masterLoop(ros::NodeHandle& nh, double seg_len, bool rotate, double rot_phi
             
             double v_test = odom_vel_ - 1.2 * alpha_max*dt_callback_; //moving too fast--try decelerating faster than nominal a_max
 
-            new_cmd_vel = (v_test > scheduled_vel) ? v_test : scheduled_vel; // choose larger of two options...don't overshoot scheduled_vel
+            new_cmd_omega = (v_test > scheduled_vel) ? v_test : scheduled_vel; // choose larger of two options...don't overshoot scheduled_vel
         } else {
-            new_cmd_vel = scheduled_vel; //silly third case: this is already true, if here.  Issue the scheduled velocity
+            new_cmd_omega = scheduled_vel; //silly third case: this is already true, if here.  Issue the scheduled velocity
         }
-        ROS_INFO("cmd vel: %f",new_cmd_vel); // debug output
+        ROS_INFO("cmd vel: %f",new_cmd_omega); // debug output
 
-        cmd_vel.angular.z = new_cmd_vel; // Make the speed of rotation right NOW as new_cmd_vel.
+        cmd_vel.angular.z = new_cmd_omega; // Make the speed of rotation right NOW as new_cmd_vel.
         
-        if (floor(rot_to_go*100) == rot_phi*100) { //uh-oh...went too far already!
+        if (floor(rot_to_go*100) <= 0.0) { //uh-oh...went too far already!
             cmd_vel.angular.z = 0.0;  //command vel=0
         }
         vel_cmd_publisher.publish(cmd_vel); // publish the command to robot0/cmd_vel
         rtimer.sleep(); // sleep for remainder of timed iteration
-        if (floor(rot_to_go*100) == rot_phi*100) break; // halt this node when this segment is complete.
+        if (floor(rot_to_go*100) <= 0.0) break; // halt this node when this segment is complete.
         // will want to generalize this to handle multiple segments
         // ideally, will want to receive segments dynamically as publications from a higher-level planner
     }
@@ -270,7 +267,7 @@ int main(int argc, char **argv) {
     // define the desired path length of this segment
     
     masterLoop(nh, 2.0, false, 0.0);
-    masterLoop(nh, 0.0, true, -1.57);
+    masterLoop(nh, 0.0, true, 1.57);
     //masterLoop(nh, 2.0, false);
 
     ROS_INFO("completed move distance");
