@@ -98,7 +98,9 @@ int main(int argc, char **argv) {
 
     // here is a crude description of one segment of a journey.  Will want to generalize this to handle multiple segments
     // define the desired path length of this segment
-    double segment_length = 0.25; // desired travel distance in meters; anticipate travelling multiple segments
+    double segment_length = 1.00; // desired travel distance in meters; anticipate travelling multiple segments
+    double segemnt_len[3] = {3.0,4.0,5.0};
+    int current_i = 0;
     
     //here's a subtlety:  might be tempted to measure distance to the goal, instead of distance from the start.
     // HOWEVER, will NEVER satisfy distance to goal = 0 precisely, but WILL eventually move far enought to satisfy distance travelled condition
@@ -110,7 +112,7 @@ int main(int argc, char **argv) {
 
     double scheduled_vel = 0.0; //desired vel, assuming all is per plan
     double new_cmd_vel = 0.1; // value of speed to be commanded; update each iteration
-    double new_cmd_omega = 0.0; // update spin rate command as well
+    double new_cmd_omega = 1.0; // update spin rate command as well
 
     geometry_msgs::Twist cmd_vel; //create a variable of type "Twist" to publish speed/spin commands
 
@@ -141,6 +143,7 @@ int main(int argc, char **argv) {
     double dist_accel = 0.5 * a_max * (T_accel * T_accel); //distance rqd to ramp up to full speed
     double dist_decel = 0.5 * a_max * (T_decel * T_decel);; //same as ramp-up distance
     double dist_const_v = segment_length - dist_accel - dist_decel; //if this is <0, never get to full spd
+    double dist_const_v_a = segemnt_len[current_i] - dist_accel - dist_decel;
     double T_const_v = dist_const_v / v_max; //will be <0 if don't get to full speed
     double T_segment_tot = T_accel + T_decel + T_const_v; // expected duration of this move
 
@@ -153,16 +156,17 @@ int main(int argc, char **argv) {
         double delta_y = odom_y_ - start_y;
         segment_length_done = sqrt(delta_x * delta_x + delta_y * delta_y);
         ROS_INFO("dist travelled: %f", segment_length_done);
-        double dist_to_go = segment_length - segment_length_done;
+        //double dist_to_go = segment_length - segment_length_done;
+        double dist_to_go_a = segemnt_len[current_i] - segment_length_done;
 
         //use segment_length_done to decide what vel should be, as per plan
-        if (dist_to_go<= 0.0) { // at goal, or overshot; stop!
+        if (dist_to_go_a<= 0.0) { // at goal, or overshot; stop!
             scheduled_vel=0.0;
         }
-        else if (dist_to_go <= dist_decel) { //possibly should be braking to a halt
+        else if (dist_to_go_a <= dist_decel) { //possibly should be braking to a halt
             // dist = 0.5*a*t_halt^2; so t_halt = sqrt(2*dist/a);   v = a*t_halt
             // so v = a*sqrt(2*dist/a) = sqrt(2*dist*a)
-            scheduled_vel = sqrt(2 * dist_to_go * a_max);
+            scheduled_vel = sqrt(2 * dist_to_go_a * a_max);
             ROS_INFO("braking zone: v_sched = %f",scheduled_vel);
         }
         else { // not ready to decel, so target vel is v_max, either accel to it or hold it
@@ -192,13 +196,19 @@ int main(int argc, char **argv) {
         ROS_INFO("cmd vel: %f",new_cmd_vel); // debug output
 
         cmd_vel.linear.x = new_cmd_vel;
-        cmd_vel.angular.z = new_cmd_omega; // spin command; always zero, in this example
-        if (dist_to_go <= 0.0) { //uh-oh...went too far already!
+        //cmd_vel.angular.z = new_cmd_omega; // spin command; always zero, in this example
+
+        if (dist_to_go_a <= 0.0) { //uh-oh...went too far already!
             cmd_vel.linear.x = 0.0;  //command vel=0
+            cmd_vel.angular.z = new_cmd_omega;
+
+            //segment_length_done = 0.0; // TO START A NEW MEASUREMENT +++++++++++++++++++++++
+            start_x = odom_x_;
+            start_y = odom_y_;
         }
         vel_cmd_publisher.publish(cmd_vel); // publish the command to robot0/cmd_vel
         rtimer.sleep(); // sleep for remainder of timed iteration
-        if (dist_to_go <= 0.0) break; // halt this node when this segment is complete.
+        if (dist_to_go_a <= 0.0) break; // halt this node when this segment is complete.
         // will want to generalize this to handle multiple segments
         // ideally, will want to receive segments dynamically as publications from a higher-level planner
     }
